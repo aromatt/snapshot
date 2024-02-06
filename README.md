@@ -21,12 +21,14 @@ Usage: snapshot [flags] [test cases]
 ## Example output
 ```
 $ snapshot example/
-example/fail.sh        FAILED
+fail.sh               FAILED
 1c1
 < bar
 ---
 > foo
 
-example/pass.sh        PASSED
-1 failed, 1 passed
+pass.sh               PASSED
+python_pass.py        PASSED
+skip.sh               SKIPPED
+1 failed, 2 passed, 1 skipped
 ```
