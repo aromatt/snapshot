@@ -61,7 +61,11 @@ func parsePaths(paths []string) ([]string, error) {
 			return nil, err
 		}
 		if !info.IsDir() && isExecutable(path) {
-			out = append(out, path)
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, absPath)
 		} else if info.IsDir() {
 			entries, err := os.ReadDir(path)
 			if err != nil {
@@ -95,7 +99,7 @@ func colorString(str string, num int) string {
 }
 
 func printStatus(path string, status TestResult, maxwidth int) {
-	name := path
+	name := filepath.Base(path)
 	padding := strings.Repeat(" ", maxwidth-len(name)+8)
 	fmt.Printf("%s%s%s\n", name, padding, colorString(status.Name, status.Color))
 }
@@ -107,7 +111,7 @@ func runTestCase(path string, update bool, quiet bool, maxwidth int) TestResult 
 	var result *exec.Cmd
 
 	if _, err := os.Stat(snapPath); err == nil || update {
-		result = exec.Command("sh", path)
+		result = exec.Command(path)
 		output, err := result.CombinedOutput()
 		if err == nil {
 			tmpfile, err := os.CreateTemp("", "snapshot")
@@ -152,15 +156,20 @@ func runTestCase(path string, update bool, quiet bool, maxwidth int) TestResult 
 	return status
 }
 
-func runTestCases(paths []string, update bool, quiet bool) *SuiteResult {
-	suiteResult := NewSuiteResult()
+func getMaxWidth(paths []string) int {
 	var maxwidth int
-	// maxwidth is the length of the longest path
 	for _, path := range paths {
-		if len(path) > maxwidth {
-			maxwidth = len(path)
+		name := filepath.Base(path)
+		if len(name) > maxwidth {
+			maxwidth = len(name)
 		}
 	}
+	return maxwidth
+}
+
+func runTestCases(paths []string, update bool, quiet bool) *SuiteResult {
+	suiteResult := NewSuiteResult()
+	maxwidth := getMaxWidth(paths)
 	for _, path := range paths {
 		suiteResult.Add(runTestCase(path, update, quiet, maxwidth))
 	}
