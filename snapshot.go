@@ -45,6 +45,7 @@ func (sr *SuiteResult) ExitCode() bool {
 	return sr.Results[Failed] > 0
 }
 
+// Returns true if `path` is executable by user, group and other.
 func isExecutable(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -53,6 +54,8 @@ func isExecutable(path string) bool {
 	return info.Mode()&0111 != 0
 }
 
+// Scans `paths` for executable files, recursing into directories. Returns a
+// slice of absolute file paths.
 func parsePaths(paths []string) ([]string, error) {
 	var out []string
 	for _, path := range paths {
@@ -179,9 +182,9 @@ func runTestCases(paths []string, update bool, quiet bool) *SuiteResult {
 func main() {
 	updateFlag := flag.Bool("u", false, "Update snapshots")
 	quietFlag := flag.Bool("q", false, "Suppress diff output")
-	// add usage banner
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags] [test cases]\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(),
+			"Usage: %s [flags] [test cases]\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 
