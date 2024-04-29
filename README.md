@@ -9,7 +9,7 @@ changes, the `snapshot` tool will report it as a failure.
 
 ## Installation
 ```
-$ go install github.com/aromatt/snapshot
+$ go install github.com/aromatt/snapshot@latest
 ```
 ## Usage
 ```
