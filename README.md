@@ -35,9 +35,6 @@ example/
 └── skip.sh
 ```
 
-Here, the shell/Python scripts are all test cases, but `skip.sh` would be skipped in
-a test run because it does not have a `.snapshot` counterpart.
-
 ## Output
 The tool outputs a summary of the test run, including diffs for failed test cases
 (unless `-q`), and returns an exit code of 1 if any tests failed.
