@@ -7,18 +7,30 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+type ColorCode string
 
 type TestResult struct {
 	Name  string
-	Color int
+	Color ColorCode
 }
 
+const (
+	Reset  = "\033[0m"
+	Red    = "\033[31m"
+	Green  = "\033[32m"
+	Yellow = "\033[33m"
+	Orange = "\033[38;5;208m"
+	Gray   = "\033[37m"
+)
+
 var (
-	Passed  = TestResult{"PASSED", 2}
-	Skipped = TestResult{"SKIPPED", 15}
-	Failed  = TestResult{"FAILED", 9}
-	Updated = TestResult{"UPDATED", 6}
+	Passed  = TestResult{"PASSED", Green}
+	Skipped = TestResult{"SKIPPED", Yellow}
+	Failed  = TestResult{"FAILED", Red}
+	Updated = TestResult{"UPDATED", Orange}
 )
 
 type SuiteResult struct {
@@ -97,14 +109,33 @@ func getDiff(path1, path2 string) (string, error) {
 	return string(out), err
 }
 
-func colorString(str string, num int) string {
-	return fmt.Sprintf("\033[38;5;%dm%s\033[0;0m", num, str)
+func colorString(str string, colorCode ColorCode) string {
+	return string(colorCode) + str + Reset
 }
 
-func printStatus(path string, status TestResult, maxwidth int) {
+func formatDuration(d time.Duration) string {
+	if d > time.Minute {
+		return d.Round(time.Second).String()
+	}
+	for unit := time.Second; unit >= time.Microsecond; unit /= 10 {
+		if d > unit {
+			d = d.Round(unit / 100)
+			break
+		}
+	}
+	return d.String()
+}
+
+func printName(path string, maxwidth int) {
 	name := filepath.Base(path)
 	padding := strings.Repeat(" ", maxwidth-len(name)+8)
-	fmt.Printf("%s%s%s\n", name, padding, colorString(status.Name, status.Color))
+	fmt.Printf("%s%s", name, padding)
+}
+
+func printStatus(status TestResult, duration time.Duration) {
+	fmt.Printf("%s\t%s\n",
+		colorString(status.Name, status.Color),
+		colorString(formatDuration(duration), Orange))
 }
 
 func runTestCase(path string, update bool, quiet bool, maxwidth int) TestResult {
@@ -112,10 +143,15 @@ func runTestCase(path string, update bool, quiet bool, maxwidth int) TestResult 
 	status := Skipped
 	var diff string
 	var result *exec.Cmd
+	var duration time.Duration
+
+	printName(path, maxwidth)
 
 	if _, err := os.Stat(snapPath); err == nil || update {
+		start := time.Now()
 		result = exec.Command(path)
 		output, err := result.CombinedOutput()
+		duration = time.Since(start)
 		if err == nil {
 			tmpfile, err := os.CreateTemp("", "snapshot")
 			if err != nil {
@@ -152,7 +188,7 @@ func runTestCase(path string, update bool, quiet bool, maxwidth int) TestResult 
 			fmt.Println("Error:", err)
 		}
 	}
-	printStatus(path, status, maxwidth)
+	printStatus(status, duration)
 	if status == Failed && diff != "" && !quiet {
 		fmt.Println(diff)
 	}
