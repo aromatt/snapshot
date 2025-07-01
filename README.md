@@ -22,18 +22,7 @@ The `[test cases]` argument can be files or directories.
 The tool will look for executable files among the arguments you provide, and will
 execute all that have matching `.snapshot` files.
 
-This repo has an [example](./example) directory full of test cases:
-```
-$ tree example/
-example/
-├── fail.sh
-├── fail.sh.snapshot
-├── pass.sh
-├── pass.sh.snapshot
-├── python_pass.py
-├── python_pass.py.snapshot
-└── skip.sh
-```
+This repo has an [example](./example) directory full of test cases.
 
 ## Output
 The tool outputs a summary of the test run, including diffs for failed test cases
@@ -42,15 +31,16 @@ The tool outputs a summary of the test run, including diffs for failed test case
 Example output:
 ```
 $ snapshot example/
-fail.sh               FAILED    2.77ms
+error.sh              FAILED    6.17ms
+exit status 1
+fail.sh               FAILED    4.13ms
 1c1
 < bar
 ---
 > foo
-
-pass.sh               PASSED    1.98ms
-python_pass.py        PASSED    30.4ms
+pass.sh               PASSED    4.44ms
+python_pass.py        PASSED    48.6ms
 skip.sh               SKIPPED   0s
 sleep.sh              PASSED    1.01s
-1 skipped, 1 failed, 3 passed
+2 failed, 3 passed, 1 skipped
 ```
