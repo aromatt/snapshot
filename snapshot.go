@@ -10,11 +10,9 @@ import (
 	"time"
 )
 
-type ColorCode string
-
-type TestResult struct {
-	Name  string
-	Color ColorCode
+type TestStatus struct {
+	Name      string
+	ColorCode string
 }
 
 const (
@@ -24,24 +22,37 @@ const (
 	Yellow = "\033[33m"
 	Orange = "\033[38;5;208m"
 	Gray   = "\033[37m"
+	Purple = "\033[35m"
 )
 
 var (
-	Passed  = TestResult{"PASSED", Green}
-	Skipped = TestResult{"SKIPPED", Yellow}
-	Failed  = TestResult{"FAILED", Red}
-	Updated = TestResult{"UPDATED", Orange}
+	Passed  = TestStatus{"PASSED", Green}
+	Skipped = TestStatus{"SKIPPED", Yellow}
+	Failed  = TestStatus{"FAILED", Red}
+	Updated = TestStatus{"UPDATED", Orange}
 )
 
+type NonemptyDiffError struct {
+	diff string
+}
+
+func (e NonemptyDiffError) Error() string {
+	return e.diff
+}
+
+func NewNonemptyDiffError(diff string) NonemptyDiffError {
+	return NonemptyDiffError{diff}
+}
+
 type SuiteResult struct {
-	Results map[TestResult]int
+	Results map[TestStatus]int
 }
 
 func NewSuiteResult() *SuiteResult {
-	return &SuiteResult{Results: make(map[TestResult]int)}
+	return &SuiteResult{Results: make(map[TestStatus]int)}
 }
 
-func (sr *SuiteResult) Add(result TestResult) {
+func (sr *SuiteResult) Add(result TestStatus) {
 	sr.Results[result]++
 }
 
@@ -53,8 +64,11 @@ func (sr *SuiteResult) Summary() string {
 	return strings.Join(parts, ", ")
 }
 
-func (sr *SuiteResult) ExitCode() bool {
-	return sr.Results[Failed] > 0
+func (sr *SuiteResult) ExitCode() int {
+	if sr.Results[Failed] > 0 {
+		return 1
+	}
+	return 0
 }
 
 // Returns true if `path` is executable by user, group and other.
@@ -109,7 +123,7 @@ func getDiff(path1, path2 string) (string, error) {
 	return string(out), err
 }
 
-func colorString(str string, colorCode ColorCode) string {
+func colorString(str string, colorCode string) string {
 	return string(colorCode) + str + Reset
 }
 
@@ -132,67 +146,69 @@ func printName(path string, maxwidth int) {
 	fmt.Printf("%s%s", name, padding)
 }
 
-func printStatus(status TestResult, duration time.Duration) {
+func printStatus(status TestStatus, duration time.Duration) {
 	fmt.Printf("%s\t%s\n",
-		colorString(status.Name, status.Color),
+		colorString(status.Name, status.ColorCode),
 		colorString(formatDuration(duration), Orange))
 }
 
-func runTestCase(path string, update bool, quiet bool, maxwidth int) TestResult {
+func printError(err error, quiet bool) {
+	if nderr, ok := err.(NonemptyDiffError); ok {
+		if !quiet {
+			fmt.Fprintf(os.Stderr, nderr.diff)
+		}
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+	}
+}
+
+func runTestCase(path string, update bool) (res TestStatus, dur time.Duration, err error) {
+	res = Skipped
 	snapPath := path + ".snapshot"
-	status := Skipped
 	var diff string
-	var result *exec.Cmd
-	var duration time.Duration
+	var cmdResult *exec.Cmd
+	var output []byte
 
-	printName(path, maxwidth)
-
-	if _, err := os.Stat(snapPath); err == nil || update {
+	if _, err = os.Stat(snapPath); err == nil || update {
 		start := time.Now()
-		result = exec.Command(path)
-		output, err := result.CombinedOutput()
-		duration = time.Since(start)
-		if err == nil {
-			tmpfile, err := os.CreateTemp("", "snapshot")
+		cmdResult = exec.Command(path)
+		output, err = cmdResult.CombinedOutput()
+		dur = time.Since(start)
+		if err != nil {
+			return Failed, dur, err
+		}
+		tmpfile, err := os.CreateTemp("", "snapshot")
+		if err != nil {
+			return Failed, dur, fmt.Errorf("creating temp file: %v", err)
+		}
+		defer os.Remove(tmpfile.Name())
+
+		if _, err := tmpfile.Write(output); err != nil {
+			return Failed, dur, fmt.Errorf("writing to temp file: %v", err)
+		}
+		tmpfile.Close()
+
+		if update {
+			err := os.Rename(tmpfile.Name(), snapPath)
 			if err != nil {
-				fmt.Println("Error creating temp file:", err)
-				return Failed
+				return Failed, dur, fmt.Errorf("updating snapshot: %v", err)
 			}
-			defer os.Remove(tmpfile.Name())
-
-			if _, err := tmpfile.Write(output); err != nil {
-				fmt.Println("Error writing to temp file:", err)
-				return Failed
-			}
-			tmpfile.Close()
-
-			if update {
-				err := os.Rename(tmpfile.Name(), snapPath)
-				if err != nil {
-					fmt.Println("Error updating snapshot:", err)
-					return Failed
-				}
-				status = Updated
-			} else {
-				diff, err = getDiff(snapPath, tmpfile.Name())
-				if err != nil {
-					status = Failed
-				} else if diff == "" {
-					status = Passed
-				} else {
-					status = Failed
-				}
-			}
+			res = Updated
 		} else {
-			status = Failed
-			fmt.Println("Error:", err)
+			diff, err = getDiff(snapPath, tmpfile.Name())
+			if err != nil {
+				if diff == "" {
+					return Failed, dur, fmt.Errorf("diff failed: %v", err)
+				}
+				return Failed, dur, NewNonemptyDiffError(diff)
+			}
+			return Passed, dur, nil
 		}
 	}
-	printStatus(status, duration)
-	if status == Failed && diff != "" && !quiet {
-		fmt.Println(diff)
-	}
-	return status
+
+	return res, dur, nil
 }
 
 func getMaxWidth(paths []string) int {
@@ -210,7 +226,11 @@ func runTestCases(paths []string, update bool, quiet bool) *SuiteResult {
 	suiteResult := NewSuiteResult()
 	maxwidth := getMaxWidth(paths)
 	for _, path := range paths {
-		suiteResult.Add(runTestCase(path, update, quiet, maxwidth))
+		printName(path, maxwidth)
+		status, duration, err := runTestCase(path, update)
+		printStatus(status, duration)
+		printError(err, quiet)
+		suiteResult.Add(status)
 	}
 	return suiteResult
 }
@@ -233,14 +253,14 @@ func main() {
 		fmt.Println("Error parsing paths:", err)
 		os.Exit(1)
 	}
+
 	if len(paths) == 0 {
 		fmt.Println("No test cases found")
 		os.Exit(1)
 	}
 
 	suiteResult := runTestCases(paths, *updateFlag, *quietFlag)
-	fmt.Println(suiteResult.Summary())
-	if suiteResult.ExitCode() {
-		os.Exit(1)
-	}
+	fmt.Println(colorString(suiteResult.Summary(), Purple))
+
+	os.Exit(suiteResult.ExitCode())
 }
