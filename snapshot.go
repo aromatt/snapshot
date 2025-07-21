@@ -10,9 +10,11 @@ import (
 	"time"
 )
 
+type ColorCode string
+
 type TestStatus struct {
 	Name      string
-	ColorCode string
+	ColorCode ColorCode
 }
 
 const (
@@ -117,14 +119,8 @@ func parsePaths(paths []string) ([]string, error) {
 	return out, nil
 }
 
-func getDiff(path1, path2 string) (string, error) {
-	cmd := exec.Command("diff", path1, path2)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-func colorString(str string, colorCode string) string {
-	return string(colorCode) + str + Reset
+func colorString(str string, cc ColorCode) string {
+	return string(cc) + str + Reset
 }
 
 func formatDuration(d time.Duration) string {
@@ -167,42 +163,55 @@ func printError(err error, quiet bool) {
 func runTestCase(path string, update bool) (res TestStatus, dur time.Duration, err error) {
 	res = Skipped
 	snapPath := path + ".snapshot"
-	var diff string
 	var cmdResult *exec.Cmd
-	var output []byte
 
 	if _, err = os.Stat(snapPath); err == nil || update {
 		start := time.Now()
 		cmdResult = exec.Command(path)
-		output, err = cmdResult.CombinedOutput()
+
+		// Create temp file for stdout (this will be used for diffing)
+		stdoutFile, err := os.CreateTemp("", "snapshot-stdout-")
+		if err != nil {
+			return Failed, dur, fmt.Errorf("creating stdout temp file: %v", err)
+		}
+		defer os.Remove(stdoutFile.Name())
+
+		// Discard stderr
+		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			stdoutFile.Close()
+			return Failed, dur, fmt.Errorf("opening /dev/null: %v", err)
+		}
+		defer devNull.Close()
+
+		cmdResult.Stdout = stdoutFile
+		cmdResult.Stderr = devNull
+
+		err = cmdResult.Run()
 		dur = time.Since(start)
+
+		// Close stdout file so we can read/rename it
+		stdoutFile.Close()
 		if err != nil {
 			return Failed, dur, err
 		}
-		tmpfile, err := os.CreateTemp("", "snapshot")
-		if err != nil {
-			return Failed, dur, fmt.Errorf("creating temp file: %v", err)
-		}
-		defer os.Remove(tmpfile.Name())
-
-		if _, err := tmpfile.Write(output); err != nil {
-			return Failed, dur, fmt.Errorf("writing to temp file: %v", err)
-		}
-		tmpfile.Close()
 
 		if update {
-			err := os.Rename(tmpfile.Name(), snapPath)
+			err := os.Rename(stdoutFile.Name(), snapPath)
 			if err != nil {
 				return Failed, dur, fmt.Errorf("updating snapshot: %v", err)
 			}
 			res = Updated
 		} else {
-			diff, err = getDiff(snapPath, tmpfile.Name())
+			cmd := exec.Command("diff", snapPath, stdoutFile.Name())
+			// TODO: don't load full diff into memory
+			out, err := cmd.CombinedOutput()
 			if err != nil {
-				if diff == "" {
-					return Failed, dur, fmt.Errorf("diff failed: %v", err)
+				// `diff` exits with a 1 if diff is nonempty; >1 if an error occurred
+				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+					return Failed, dur, NewNonemptyDiffError(string(out))
 				}
-				return Failed, dur, NewNonemptyDiffError(diff)
+				return Failed, dur, fmt.Errorf("diff error: %v", err)
 			}
 			return Passed, dur, nil
 		}
