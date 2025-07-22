@@ -31,16 +31,17 @@ The tool outputs a summary of the test run, including diffs for failed test case
 Example output:
 ```
 $ snapshot example/
-error.sh              FAILED    6.17ms
-exit status 1
-fail.sh               FAILED    4.13ms
+diff.sh               FAILED    4.36ms
 1c1
 < bar
 ---
 > foo
-pass.sh               PASSED    4.44ms
-python_pass.py        PASSED    48.6ms
+error.sh              FAILED    2.88ms
+exit status 1
+pass.sh               PASSED    2.94ms
+python_pass.py        PASSED    34.7ms
 skip.sh               SKIPPED   0s
 sleep.sh              PASSED    1.01s
-2 failed, 3 passed, 1 skipped
+stderr.sh             PASSED    5.52ms
+2 failed, 4 passed, 1 skipped
 ```
